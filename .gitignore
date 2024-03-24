@@ -1,0 +1,13 @@
+.idea
+docker/container_data/
+main
+credentials.json
+openapitools.json
+docs/generated/**
+!docs/generated/openapi
+/.air/tmp/
+.DS_Store
+.vscode/launch.json
+app/server/generated/spec.go
+/.envrc
+/.run/
