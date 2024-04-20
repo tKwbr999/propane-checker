@@ -6,29 +6,35 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"propane-checker/conf"
 	"propane-checker/conf/area"
-	"propane-checker/conf/area/city"
 	"text/template"
 )
 
-const cityTemplate = `package city
+const cityTemplate = `package area
 
-var PrefectureCode{{.PrefectureCode}} = Prefecture{
-	PrefectureCode: "{{.PrefectureCode}}",
-	Cities: []City{
-		{{- range .Cities}}
+var Area{{.Code}}{{.En}} =  []Area{
+	{{- range .List}}
 		{
-			Code: "{{.Code}}",
+			ID: "{{.ID}}",
 			Name: "{{.Name}}",
 		},
-		{{- end}}
-	},
+	{{- end}}
 }
 `
 
-func fetchCities(prefectureCode string) (*city.Prefecture, error) {
-	url := fmt.Sprintf("https://www.land.mlit.go.jp/webland/api/CitySearch?area=%s", prefectureCode)
-	resp, err := http.Get(url)
+func fetchCities(code string) ([]*area.Area, error) {
+	url := fmt.Sprintf("https://www.reinfolib.mlit.go.jp/ex-api/external/XIT002?area=%s", code)
+
+	// HTTPSのリクエストを発行する
+	req, err := http.NewRequest("GET", url, nil)
+	// APIキーをリクエストヘッダーOcp-Apim-Subscription-Keyに設定する
+	req.Header.Set("Ocp-Apim-Subscription-Key", os.Getenv("REINFOLIB_API_KEY"))
+
+	// リクエストを送信する
+	client := new(http.Client)
+	resp, err := client.Do(req)
+
 	if err != nil {
 		return nil, err
 	}
@@ -40,41 +46,40 @@ func fetchCities(prefectureCode string) (*city.Prefecture, error) {
 	}
 
 	var citiesResponse struct {
-		Status string `json:"status"`
-		Data   []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"data"`
+		Status string       `json:"status"`
+		City   []*area.Area `json:"data"`
 	}
 
 	if err := json.Unmarshal(body, &citiesResponse); err != nil {
 		return nil, err
 	}
-	var response city.Prefecture
-	response.PrefectureCode = prefectureCode
-	for _, c := range citiesResponse.Data {
-		response.Cities = append(response.Cities, city.City{
-			Code: c.ID,
-			Name: c.Name,
-		})
-	}
 
-	return &response, nil
+	return citiesResponse.City, nil
 }
 
-func writeCitiesToFile(code string, p *city.Prefecture) error {
+func writeCitiesToFile(code, en string, list []*area.Area) error {
 	tmpl, err := template.New("city").Parse(cityTemplate)
 	if err != nil {
 		return err
 	}
 
-	file, err := os.Create(fmt.Sprintf("./conf/area/city/prefectureCode%s.go", code))
+	file, err := os.Create(fmt.Sprintf("./conf/area/area%s%s.go", code, en))
 	if err != nil {
 		return err
 	}
 	defer file.Close()
 
-	err = tmpl.Execute(file, p)
+	var templateData = struct {
+		Code string
+		En   string
+		List []*area.Area
+	}{
+		Code: code,
+		En:   en,
+		List: list,
+	}
+
+	err = tmpl.Execute(file, templateData)
 	if err != nil {
 		return err
 	}
@@ -83,14 +88,13 @@ func writeCitiesToFile(code string, p *city.Prefecture) error {
 }
 
 func main() {
-	for k, _ := range area.CodePrefecture {
+	for k, v := range conf.CodePrefectures {
 		cities, err := fetchCities(k)
 		if err != nil {
 			panic(err)
 			return
 		}
-		//citiesの内容を持ったstructを13.goに作成
-		err = writeCitiesToFile(k, cities)
+		err = writeCitiesToFile(k, v.PrefectureEn(), cities)
 		if err != nil {
 			panic(err)
 		}
